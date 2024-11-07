@@ -67,6 +67,16 @@ chaquopy {
         getByName("py310") { version = "3.10" }
         getByName("py311") { version = "3.11" }
     }
+    defaultConfig {
+        pip {
+            install("yt_dlp")  // Spécifiez une version récente
+            install("requests>=2.28.1")
+            install("certifi>=2023.7.22")
+            install("urllib3>=2.2.3")
+//            install("ssl")
+//            install("os")
+        }
+    }
 }
 
 dependencies {

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config>
+        <trust-anchors>
+            <!-- Utiliser les certificats système -->
+            <certificates src="system" />
+            <!-- Utiliser les certificats utilisateur si nécessaire -->
+            <certificates src="user" />
+            <!-- Optionnel: Inclure des certificats personnalisés -->
+            <!-- <certificates src="@raw/custom_ca" /> -->
+        </trust-anchors>
+    </base-config>
+
+    <!-- Optionnel: Configurations spécifiques pour certains domaines -->
+    <!--
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">example.com</domain>
+    </domain-config>
+    -->
+</network-security-config>
