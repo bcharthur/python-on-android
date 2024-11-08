@@ -17,13 +17,15 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
@@ -39,6 +41,7 @@ import com.example.downloader.ui.theme.DownloaderTheme
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -58,11 +61,48 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             DownloaderTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    DownloaderScreen(modifier = Modifier.padding(innerPadding))
-                }
+                MainScreen()
             }
         }
+    }
+}
+
+@Composable
+fun MainScreen() {
+    var showSplash by remember { mutableStateOf(true) }
+
+    if (showSplash) {
+        SplashScreen {
+            showSplash = false
+        }
+    } else {
+        Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+            DownloaderScreen(modifier = Modifier.padding(innerPadding))
+        }
+    }
+}
+
+@Composable
+fun SplashScreen(onSplashFinished: () -> Unit) {
+    // Utiliser LaunchedEffect pour gérer la temporisation
+    LaunchedEffect(Unit) {
+        delay(2000L) // Afficher le Splash Screen pendant 2 secondes
+        onSplashFinished()
+    }
+
+    // UI du Splash Screen
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "Downloader App",
+            color = Color.White,
+            fontSize = 32.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
@@ -76,10 +116,7 @@ fun DownloaderScreen(modifier: Modifier = Modifier) {
     var isDownloading by remember { mutableStateOf(false) }
     var downloadedVideoUri by remember { mutableStateOf<Uri?>(null) }
 
-    var expanded by remember { mutableStateOf(false) }
-    var selectedFolder by remember { mutableStateOf("Téléchargements") }
-
-    val folders = listOf("Téléchargements", "Pictures", "Movies", "Documents")
+    // Removed selectedFolder and folders since we're imposing 'Download' folder
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -152,78 +189,58 @@ fun DownloaderScreen(modifier: Modifier = Modifier) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Champ de saisie pour l'URL
-        OutlinedTextField(
-            value = videoUrl,
-            onValueChange = { videoUrl = it },
-            label = { Text("Entrez l'URL de la vidéo YouTube") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Sélecteur de dossier
-        ExposedDropdownMenuBox(
-            expanded = expanded,
-            onExpandedChange = { expanded = !expanded }
+        // Champ de saisie pour l'URL et Bouton Rechercher côte à côte
+        Row(
+            modifier = Modifier
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             OutlinedTextField(
-                value = selectedFolder,
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("Sélectionnez le dossier de téléchargement") },
-                trailingIcon = {
-                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
-                },
-                modifier = Modifier.fillMaxWidth()
+                value = videoUrl,
+                onValueChange = { videoUrl = it },
+                label = { Text("Entrez l'URL de la vidéo YouTube") },
+                modifier = Modifier
+                    .weight(1f) // Prend tout l'espace disponible
+                    .padding(end = 8.dp),
+                singleLine = true
             )
-            ExposedDropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false }
-            ) {
-                folders.forEach { folder ->
-                    DropdownMenuItem(
-                        text = { Text(folder) },
-                        onClick = {
-                            selectedFolder = folder
-                            expanded = false
+
+            // Bouton Rechercher avec icône de loupe agrandie
+            Button(
+                onClick = {
+                    if (videoUrl.isNotBlank()) {
+                        coroutineScope.launch {
+                            isFetching = true
+                            val (videoTitle, thumbnail) = fetchVideoInfo(videoUrl, context)
+                            title = videoTitle
+                            thumbnailPath = thumbnail
+                            isFetching = false
                         }
+                    } else {
+                        Toast.makeText(context, "Veuillez entrer une URL de vidéo.", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                enabled = !isFetching && !isDownloading,
+                modifier = Modifier
+                    .size(64.dp) // Taille agrandie pour le bouton
+            ) {
+                if (isFetching) {
+                    CircularProgressIndicator(
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier
+                            .size(24.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Filled.Search,
+                        contentDescription = "Rechercher",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp) // Taille agrandie de l'icône
                     )
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Bouton pour récupérer les informations de la vidéo
-        Button(
-            onClick = {
-                if (videoUrl.isNotBlank()) {
-                    coroutineScope.launch {
-                        isFetching = true
-                        val (videoTitle, thumbnail) = fetchVideoInfo(videoUrl, context)
-                        title = videoTitle
-                        thumbnailPath = thumbnail
-                        isFetching = false
-                    }
-                } else {
-                    Toast.makeText(context, "Veuillez entrer une URL de vidéo.", Toast.LENGTH_SHORT).show()
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !isFetching && !isDownloading
-        ) {
-            if (isFetching) {
-                CircularProgressIndicator(
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier
-                        .size(24.dp)
-                        .padding(end = 8.dp),
-                    strokeWidth = 2.dp
-                )
-            }
-            Text("Rechercher")
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -235,52 +252,64 @@ fun DownloaderScreen(modifier: Modifier = Modifier) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Bouton pour télécharger la vidéo
+        // Boutons pour télécharger la vidéo et accéder à la vidéo téléchargée
         if (title.isNotBlank() && thumbnailPath != null) {
-            Button(
-                onClick = {
-                    coroutineScope.launch {
-                        isDownloading = true
-                        val successUri = downloadVideo(videoUrl, context, selectedFolder)
-                        if (successUri != null) {
-                            downloadedVideoUri = successUri
-                            Toast.makeText(context, "Vidéo téléchargée avec succès.", Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(context, "Erreur lors du téléchargement de la vidéo.", Toast.LENGTH_SHORT).show()
-                        }
-                        isDownloading = false
-                    }
-                },
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                enabled = !isDownloading && !isFetching
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (isDownloading) {
-                    CircularProgressIndicator(
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier
-                            .size(24.dp)
-                            .padding(end = 8.dp),
-                        strokeWidth = 2.dp
+                // Bouton Télécharger
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            isDownloading = true
+                            val successUri = downloadVideo(url = videoUrl, context = context)
+                            if (successUri != null) {
+                                downloadedVideoUri = successUri
+                                Toast.makeText(context, "Vidéo téléchargée avec succès.", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Erreur lors du téléchargement de la vidéo.", Toast.LENGTH_SHORT).show()
+                            }
+                            isDownloading = false
+                        }
+                    },
+                    enabled = !isDownloading && !isFetching,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    if (isDownloading) {
+                        CircularProgressIndicator(
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier
+                                .size(24.dp)
+                                .padding(end = 8.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Filled.Download,
+                        contentDescription = "Télécharger",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
                     )
                 }
-                Text("Télécharger")
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                // Bouton Accéder à la vidéo
+                if (downloadedVideoUri != null) {
+                    Button(
+                        onClick = { openVideo(context, downloadedVideoUri!!) },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Green),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Accéder à la vidéo")
+                    }
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
-
-        // Bouton pour accéder à la vidéo téléchargée
-        if (downloadedVideoUri != null) {
-            Button(
-                onClick = {
-                    openVideo(context, downloadedVideoUri!!)
-                },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Green)
-            ) {
-                Text("Accéder à la vidéo")
-            }
-        }
     }
 }
 
@@ -456,9 +485,8 @@ suspend fun downloadThumbnail(url: String, file: File, context: Context) {
     }
 }
 
-
 @SuppressLint("NewApi")
-suspend fun downloadVideo(url: String, context: Context, folder: String): Uri? {
+suspend fun downloadVideo(url: String, context: Context): Uri? {
     return withContext(Dispatchers.IO) {
         try {
             val py = Python.getInstance()
@@ -467,24 +495,14 @@ suspend fun downloadVideo(url: String, context: Context, folder: String): Uri? {
             // Définir le nom de fichier
             val videoFilename = "video_${System.currentTimeMillis()}.mp4"
 
-            // Déterminer l'URI de MediaStore en fonction du dossier sélectionné
-            val collection: Uri = when (folder) {
-                "Pictures" -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                "Movies" -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-                "Documents" -> MediaStore.Files.getContentUri("external")
-                else -> MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            }
+            // Déterminer l'URI de MediaStore en imposant le dossier Téléchargements
+            val collection: Uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
 
             // Créer le ContentValues en fonction du dossier
             val contentValues = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, videoFilename)
                 put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, when (folder) {
-                    "Pictures" -> "Pictures/Downloader/"
-                    "Movies" -> "Movies/Downloader/"
-                    "Documents" -> "Documents/Downloader/"
-                    else -> "Download/Downloader/"
-                })
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/Downloader/")
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
@@ -539,7 +557,7 @@ suspend fun downloadVideo(url: String, context: Context, folder: String): Uri? {
                 tempFile.delete()
 
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "Vidéo téléchargée dans $folder.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Vidéo téléchargée dans Téléchargements.", Toast.LENGTH_LONG).show()
                 }
 
                 uri
