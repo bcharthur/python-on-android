@@ -1,8 +1,11 @@
+// MainActivity.kt
 package com.example.downloader
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -11,17 +14,27 @@ import android.provider.MediaStore
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import coil.compose.rememberImagePainter
 import com.example.downloader.ui.theme.DownloaderTheme
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
@@ -30,24 +43,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.OutputStream
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.ui.tooling.preview.Preview
 
 class MainActivity : ComponentActivity() {
-
-    // Enregistrement du launcher pour les permissions
-    private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val allGranted = permissions.entries.all { it.value }
-        if (allGranted) {
-            Toast.makeText(this, "Permissions accordées", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(
-                this,
-                "Permissions refusées. L'application ne fonctionnera pas correctement.",
-                Toast.LENGTH_LONG
-            ).show()
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -55,11 +54,6 @@ class MainActivity : ComponentActivity() {
         // Initialiser Python si ce n'est pas déjà fait
         if (!Python.isStarted()) {
             Python.start(AndroidPlatform(this))
-        }
-
-        // Demander les permissions si elles ne sont pas déjà accordées
-        if (!hasPermissions()) {
-            requestPermissions()
         }
 
         setContent {
@@ -70,53 +64,17 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
-    private fun hasPermissions(): Boolean {
-        val readPermission = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.READ_EXTERNAL_STORAGE
-        ) == PackageManager.PERMISSION_GRANTED
-
-        return if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            val writePermission = ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE
-            ) == PackageManager.PERMISSION_GRANTED
-            readPermission && writePermission
-        } else {
-            // À partir d'Android 10, WRITE_EXTERNAL_STORAGE n'est plus nécessaire pour MediaStore
-            readPermission
-        }
-    }
-
-    private fun requestPermissions() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            requestPermissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.READ_EXTERNAL_STORAGE,
-                    Manifest.permission.WRITE_EXTERNAL_STORAGE
-                )
-            )
-        } else {
-            // À partir d'Android 10, seule la lecture est nécessaire
-            requestPermissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.READ_EXTERNAL_STORAGE
-                )
-            )
-        }
-    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DownloaderScreen(modifier: Modifier = Modifier) {
-    var videoUrl by remember { mutableStateOf(TextFieldValue("")) }
+    var videoUrl by remember { mutableStateOf("") }
     var title by remember { mutableStateOf("") }
     var thumbnailPath by remember { mutableStateOf<String?>(null) }
     var isFetching by remember { mutableStateOf(false) }
     var isDownloading by remember { mutableStateOf(false) }
-    var sslTestResult by remember { mutableStateOf("") }
+    var downloadedVideoUri by remember { mutableStateOf<Uri?>(null) }
 
     var expanded by remember { mutableStateOf(false) }
     var selectedFolder by remember { mutableStateOf("Téléchargements") }
@@ -126,16 +84,66 @@ fun DownloaderScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
+    // Gestion des permissions avec explication préalable
+    var showPermissionRationale by remember { mutableStateOf(false) }
+
+    // Launcher pour demander les permissions
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+        onResult = { permissions ->
+            val allGranted = permissions.entries.all { it.value }
+            if (allGranted) {
+                Toast.makeText(context, "Permissions accordées", Toast.LENGTH_SHORT).show()
+            }
+        }
+    )
+
+    // Vérification des permissions au lancement
+    LaunchedEffect(key1 = Unit) {
+        if (!hasPermissions(context)) {
+            if (shouldShowRationale(context)) {
+                showPermissionRationale = true
+            } else {
+                requestPermissions(permissionLauncher, context)
+            }
+        }
+    }
+
+    // Dialogue d'explication des permissions
+    if (showPermissionRationale) {
+        AlertDialog(
+            onDismissRequest = { showPermissionRationale = false },
+            title = { Text("Permissions nécessaires") },
+            text = { Text("Cette application a besoin d'accéder à votre stockage pour télécharger des vidéos.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPermissionRationale = false
+                    requestPermissions(permissionLauncher, context)
+                }) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPermissionRationale = false }) {
+                    Text("Annuler")
+                }
+            }
+        )
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             text = "Web Downloader",
-            style = MaterialTheme.typography.headlineMedium
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -149,7 +157,8 @@ fun DownloaderScreen(modifier: Modifier = Modifier) {
             value = videoUrl,
             onValueChange = { videoUrl = it },
             label = { Text("Entrez l'URL de la vidéo YouTube") },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -190,10 +199,10 @@ fun DownloaderScreen(modifier: Modifier = Modifier) {
         // Bouton pour récupérer les informations de la vidéo
         Button(
             onClick = {
-                if (videoUrl.text.isNotBlank()) {
+                if (videoUrl.isNotBlank()) {
                     coroutineScope.launch {
                         isFetching = true
-                        val (videoTitle, thumbnail) = fetchVideoInfo(videoUrl.text, context)
+                        val (videoTitle, thumbnail) = fetchVideoInfo(videoUrl, context)
                         title = videoTitle
                         thumbnailPath = thumbnail
                         isFetching = false
@@ -232,8 +241,9 @@ fun DownloaderScreen(modifier: Modifier = Modifier) {
                 onClick = {
                     coroutineScope.launch {
                         isDownloading = true
-                        val success = downloadVideo(videoUrl.text, context, selectedFolder)
-                        if (success) {
+                        val successUri = downloadVideo(videoUrl, context, selectedFolder)
+                        if (successUri != null) {
+                            downloadedVideoUri = successUri
                             Toast.makeText(context, "Vidéo téléchargée avec succès.", Toast.LENGTH_SHORT).show()
                         } else {
                             Toast.makeText(context, "Erreur lors du téléchargement de la vidéo.", Toast.LENGTH_SHORT).show()
@@ -259,23 +269,17 @@ fun DownloaderScreen(modifier: Modifier = Modifier) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Bouton pour tester la connexion SSL
-        Button(
-            onClick = {
-                coroutineScope.launch {
-                    val result = testSSL(context)
-                    sslTestResult = result
-                }
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Tester la connexion SSL")
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        if (sslTestResult.isNotBlank()) {
-            Text("Résultat du test SSL : $sslTestResult")
+        // Bouton pour accéder à la vidéo téléchargée
+        if (downloadedVideoUri != null) {
+            Button(
+                onClick = {
+                    openVideo(context, downloadedVideoUri!!)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Green)
+            ) {
+                Text("Accéder à la vidéo")
+            }
         }
     }
 }
@@ -284,7 +288,8 @@ fun DownloaderScreen(modifier: Modifier = Modifier) {
 fun SupportedPlatformsText() {
     Text(
         text = "Plateformes supportées : YouTube, Dailymotion",
-        style = MaterialTheme.typography.bodyMedium
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
     )
 }
 
@@ -293,25 +298,101 @@ fun VideoInfoCard(title: String, thumbnailPath: String) {
     Card(
         modifier = Modifier
             .fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.LightGray.copy(alpha = 0.2f)),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleMedium
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
             )
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Remplacer l'image par du texte
-            Text(
-                text = "Miniature de la vidéo",
-                style = MaterialTheme.typography.bodyMedium
+            // Affichage de la miniature de la vidéo
+            Image(
+                painter = rememberImagePainter(thumbnailPath),
+                contentDescription = "Miniature de la vidéo",
+                modifier = Modifier
+                    .height(200.dp)
+                    .fillMaxWidth(),
+                contentScale = ContentScale.Crop
             )
         }
+    }
+}
+
+// Fonction pour vérifier si les permissions sont accordées
+fun hasPermissions(context: Context): Boolean {
+    val readPermission = ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.READ_EXTERNAL_STORAGE
+    ) == PackageManager.PERMISSION_GRANTED
+
+    return if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        val writePermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE
+        ) == PackageManager.PERMISSION_GRANTED
+        readPermission && writePermission
+    } else {
+        // À partir d'Android 10, WRITE_EXTERNAL_STORAGE n'est plus nécessaire pour MediaStore
+        readPermission
+    }
+}
+
+// Fonction pour déterminer si une explication des permissions doit être montrée
+fun shouldShowRationale(context: Context): Boolean {
+    if (context is ComponentActivity) {
+        return if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            context.shouldShowRequestPermissionRationale(Manifest.permission.READ_EXTERNAL_STORAGE) ||
+                    context.shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        } else {
+            context.shouldShowRequestPermissionRationale(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+    }
+    return false
+}
+
+// Fonction pour demander les permissions
+fun requestPermissions(
+    permissionLauncher: ActivityResultLauncher<Array<String>>,
+    context: Context
+) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        permissionLauncher.launch(
+            arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+        )
+    } else {
+        permissionLauncher.launch(
+            arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            )
+        )
+    }
+}
+
+// Fonction pour ouvrir la vidéo téléchargée
+fun openVideo(context: Context, uri: Uri) {
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, "video/*")
+        flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+    }
+    // Vérifier s'il existe une application pour gérer l'intent
+    if (intent.resolveActivity(context.packageManager) != null) {
+        context.startActivity(intent)
+    } else {
+        Toast.makeText(context, "Aucune application trouvée pour ouvrir cette vidéo.", Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -325,6 +406,9 @@ suspend fun fetchVideoInfo(url: String, context: Context): Pair<String, String?>
             val thumbnailDir = File(context.cacheDir, "thumbnails")
             if (!thumbnailDir.exists()) {
                 thumbnailDir.mkdirs()
+            } else {
+                // Supprimer toutes les miniatures existantes
+                thumbnailDir.listFiles()?.forEach { it.delete() }
             }
 
             val result = pyModule.callAttr("get_video_info", url, thumbnailDir.absolutePath)
@@ -335,15 +419,11 @@ suspend fun fetchVideoInfo(url: String, context: Context): Pair<String, String?>
 
             // Télécharger la miniature si l'URL est présente
             val thumbnailPath = if (thumbnailUrl.isNotBlank()) {
-                val thumbnailFilename = thumbnailUrl.substringAfterLast("/").takeIf { it.isNotBlank() }
-                thumbnailFilename?.let {
-                    val thumbnailFile = File(thumbnailDir, it)
-                    if (!thumbnailFile.exists()) {
-                        // Télécharger la miniature
-                        downloadThumbnail(thumbnailUrl, thumbnailFile)
-                    }
-                    thumbnailFile.absolutePath
-                }
+                val thumbnailFilename = "current_thumbnail.jpg" // Nom fixe pour la miniature
+                val thumbnailFile = File(thumbnailDir, thumbnailFilename)
+                // Télécharger la miniature, écrasant l'ancienne si elle existe
+                downloadThumbnail(thumbnailUrl, thumbnailFile, context)
+                thumbnailFile.absolutePath
             } else {
                 null
             }
@@ -358,7 +438,7 @@ suspend fun fetchVideoInfo(url: String, context: Context): Pair<String, String?>
     }
 }
 
-suspend fun downloadThumbnail(url: String, file: File) {
+suspend fun downloadThumbnail(url: String, file: File, context: Context) {
     withContext(Dispatchers.IO) {
         try {
             val connection = java.net.URL(url).openConnection()
@@ -369,11 +449,16 @@ suspend fun downloadThumbnail(url: String, file: File) {
             }
         } catch (e: Exception) {
             // Gérer l'erreur de téléchargement de la miniature
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "Erreur de téléchargement de la miniature: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 }
 
-suspend fun downloadVideo(url: String, context: Context, folder: String): Boolean {
+
+@SuppressLint("NewApi")
+suspend fun downloadVideo(url: String, context: Context, folder: String): Uri? {
     return withContext(Dispatchers.IO) {
         try {
             val py = Python.getInstance()
@@ -413,7 +498,7 @@ suspend fun downloadVideo(url: String, context: Context, folder: String): Boolea
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, "Impossible de créer l'URI de téléchargement.", Toast.LENGTH_LONG).show()
                 }
-                return@withContext false
+                return@withContext null
             }
 
             // Ouvrir un flux de sortie vers l'URI
@@ -423,7 +508,7 @@ suspend fun downloadVideo(url: String, context: Context, folder: String): Boolea
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, "Impossible d'ouvrir le flux de sortie.", Toast.LENGTH_LONG).show()
                 }
-                return@withContext false
+                return@withContext null
             }
 
             // Appeler la fonction de téléchargement en passant le chemin temporaire
@@ -457,42 +542,18 @@ suspend fun downloadVideo(url: String, context: Context, folder: String): Boolea
                     Toast.makeText(context, "Vidéo téléchargée dans $folder.", Toast.LENGTH_LONG).show()
                 }
 
-                true
+                uri
             } else {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, "Fichier temporaire introuvable.", Toast.LENGTH_LONG).show()
                 }
-                false
+                null
             }
         } catch (e: Exception) {
             withContext(Dispatchers.Main) {
                 Toast.makeText(context, "Erreur: ${e.message}", Toast.LENGTH_LONG).show()
             }
-            false
-        }
-    }
-}
-
-fun createDownloadUri(context: Context, filename: String): Uri? {
-    val resolver = context.contentResolver
-    val contentValues = ContentValues().apply {
-        put(MediaStore.Downloads.DISPLAY_NAME, filename)
-        put(MediaStore.Downloads.MIME_TYPE, "video/mp4")
-        put(MediaStore.Downloads.IS_PENDING, 1)
-    }
-
-    return resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-}
-
-suspend fun testSSL(context: Context): String {
-    return withContext(Dispatchers.IO) {
-        try {
-            val py = Python.getInstance()
-            val pyModule = py.getModule("test_ssl") // Nom du fichier sans .py
-            val result = pyModule.callAttr("test_ssl")
-            result.toString()
-        } catch (e: Exception) {
-            e.message ?: "Unknown error"
+            null
         }
     }
 }
