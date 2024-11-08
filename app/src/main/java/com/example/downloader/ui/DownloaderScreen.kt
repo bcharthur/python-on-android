@@ -32,6 +32,7 @@ import com.example.downloader.utils.PermissionUtils.shouldShowRationale
 import com.example.downloader.utils.downloadVideo
 import com.example.downloader.utils.fetchVideoInfo
 import com.example.downloader.utils.openVideo
+import com.example.downloader.utils.openVideo
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -166,7 +167,6 @@ fun DownloaderScreen(modifier: Modifier = Modifier) {
                     )
                 }
             }
-
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -177,6 +177,17 @@ fun DownloaderScreen(modifier: Modifier = Modifier) {
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+
+        // Afficher la barre de progression pendant le téléchargement
+        if (isDownloading) {
+            Spacer(modifier = Modifier.height(16.dp))
+            IndeterminateProgressBar(modifier = Modifier.size(48.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Téléchargement en cours...",
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
 
         // Boutons pour télécharger la vidéo et accéder à la vidéo téléchargée
         if (title.isNotBlank() && thumbnailPath != null) {
