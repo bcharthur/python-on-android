@@ -90,6 +90,11 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    // Dépendance pour Activity Compose
+        implementation("androidx.activity:activity-compose:1.7.2") // Utilisez la dernière version disponible
+
+    // Dépendance Coil pour le chargement des images
+    implementation("io.coil-kt:coil-compose:2.4.0") // Utilisez la dernière version disponible
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
